@@ -1,4 +1,5 @@
 import { writable, get, derived } from 'svelte/store'
+import { addNodeListener } from 'svelte-listener'
 
 export const visibility = writable({
   component: true,
@@ -18,39 +19,39 @@ export const profileFrame = writable({})
 
 const nodeMap = new Map()
 
-const port = chrome.runtime.connect()
-port.postMessage({
-  type: 'init',
-  tabId: chrome.devtools.inspectedWindow.tabId
-})
+// const port = chrome.runtime.connect()
+// port.postMessage({
+//   type: 'init',
+//   tabId: chrome.devtools.inspectedWindow.tabId
+// })
 
 export function reload() {
-  port.postMessage({
-    type: 'reload',
-    tabId: chrome.devtools.inspectedWindow.tabId
-  })
+  // port.postMessage({
+  //   type: 'reload',
+  //   tabId: chrome.devtools.inspectedWindow.tabId
+  // })
 }
 
 export function startPicker() {
-  port.postMessage({
-    type: 'startPicker',
-    tabId: chrome.devtools.inspectedWindow.tabId
-  })
+  // port.postMessage({
+  //   type: 'startPicker',
+  //   tabId: chrome.devtools.inspectedWindow.tabId
+  // })
 }
 
 export function stopPicker() {
-  port.postMessage({
-    type: 'stopPicker',
-    tabId: chrome.devtools.inspectedWindow.tabId
-  })
+  // port.postMessage({
+  //   type: 'stopPicker',
+  //   tabId: chrome.devtools.inspectedWindow.tabId
+  // })
 }
 
 selectedNode.subscribe(node => {
-  port.postMessage({
-    type: 'setSelected',
-    tabId: chrome.devtools.inspectedWindow.tabId,
-    nodeId: node.id
-  })
+  // port.postMessage({
+  //   type: 'setSelected',
+  //   tabId: chrome.devtools.inspectedWindow.tabId,
+  //   nodeId: node.id
+  // })
 
   let invalid = null
   while (node.parent) {
@@ -64,19 +65,19 @@ selectedNode.subscribe(node => {
   if (invalid) invalid.invalidate()
 })
 
-hoveredNodeId.subscribe(nodeId =>
-  port.postMessage({
-    type: 'setHover',
-    tabId: chrome.devtools.inspectedWindow.tabId,
-    nodeId
-  })
+hoveredNodeId.subscribe(nodeId => {}
+  // port.postMessage({
+  //   type: 'setHover',
+  //   tabId: chrome.devtools.inspectedWindow.tabId,
+  //   nodeId
+  // })
 )
 
-profilerEnabled.subscribe(o =>
-  port.postMessage({
-    type: o ? 'startProfiler' : 'stopProfiler',
-    tabId: chrome.devtools.inspectedWindow.tabId
-  })
+profilerEnabled.subscribe(o => {}
+  // port.postMessage({
+  //   type: o ? 'startProfiler' : 'stopProfiler',
+  //   tabId: chrome.devtools.inspectedWindow.tabId
+  // })
 )
 
 function noop() {}
@@ -134,78 +135,150 @@ function resolveEventBubble(node) {
   }
 }
 
-port.onMessage.addListener(msg => {
-  switch (msg.type) {
-    case 'clear': {
-      selectedNode.set({})
-      hoveredNodeId.set(null)
-      rootNodes.set([])
+function addNode({ target, anchor, node }) {
+  node.children = []
+  node.collapsed = true
+  node.invalidate = noop
+  resolveEventBubble(node)
 
-      break
-    }
+  const targetNode = nodeMap.get(target)
+  nodeMap.set(node.id, node)
 
-    case 'addNode': {
-      const node = msg.node
-      node.children = []
-      node.collapsed = true
-      node.invalidate = noop
-      resolveEventBubble(node)
-
-      const targetNode = nodeMap.get(msg.target)
-      nodeMap.set(node.id, node)
-
-      if (targetNode) {
-        insertNode(node, targetNode, msg.anchor)
-        return
-      }
-
-      if (node._timeout) return
-
-      node._timeout = setTimeout(() => {
-        delete node._timeout
-        const targetNode = nodeMap.get(msg.target)
-        if (targetNode) insertNode(node, targetNode, msg.anchor)
-        else rootNodes.update(o => (o.push(node), o))
-      }, 100)
-
-      break
-    }
-
-    case 'removeNode': {
-      const node = nodeMap.get(msg.node.id)
-      const index = node.parent.children.findIndex(o => o.id == node.id)
-      node.parent.children.splice(index, 1)
-      nodeMap.delete(node.id)
-
-      node.parent.invalidate()
-
-      break
-    }
-
-    case 'updateNode': {
-      const node = nodeMap.get(msg.node.id)
-      Object.assign(node, msg.node)
-      resolveEventBubble(node)
-
-      const selected = get(selectedNode)
-      if (selected && selected.id == msg.node.id) selectedNode.update(o => o)
-
-      node.invalidate()
-
-      break
-    }
-
-    case 'inspect': {
-      let node = nodeMap.get(msg.node.id)
-      selectedNode.set(node)
-
-      break
-    }
-
-    case 'updateProfile': {
-      resolveFrame(msg.frame)
-      profileFrame.set(msg.frame)
-      break
-    }
+  if (targetNode) {
+    insertNode(node, targetNode, anchor)
+    return
   }
+
+  if (node._timeout) return
+
+  node._timeout = setTimeout(() => {
+    delete node._timeout
+    const targetNode = nodeMap.get(target)
+    if (targetNode) insertNode(node, targetNode, anchor)
+    else rootNodes.update(o => (o.push(node), o))
+  }, 100)
+}
+
+addNodeListener({
+  add(node, anchor) {
+    const target = node.parent ? node.parent.id : null;
+    anchor = anchor ? anchor.id : null;
+    node.children = []
+    node.collapsed = true
+    node.invalidate = noop
+    resolveEventBubble(node)
+
+    const targetNode = nodeMap.get(target)
+    nodeMap.set(node.id, node)
+
+    if (targetNode) {
+      insertNode(node, targetNode, anchor)
+      return
+    }
+
+    if (node._timeout) return
+
+    node._timeout = setTimeout(() => {
+      delete node._timeout
+      const targetNode = nodeMap.get(target)
+      if (targetNode) insertNode(node, targetNode, anchor)
+      else rootNodes.update(o => (o.push(node), o))
+    }, 100)
+  },
+  remove(node) {
+    console.log('remove', node);
+    const toRemove = nodeMap.get(node.id);
+    nodeMap.delete(toRemove.id)
+
+    if (toRemove.parent) {
+      const index = toRemove.parent.children.findIndex(o => o.id == toRemove.id)
+      toRemove.parent.children.splice(index, 1)
+      toRemove.parent.invalidate()
+    }
+  },
+  update(node) {
+    const toUpdate = nodeMap.get(node.id)
+    Object.assign(toUpdate, node)
+    resolveEventBubble(toUpdate)
+
+    const selected = get(selectedNode)
+    if (selected && selected.id == node.id) selectedNode.update(o => o)
+
+    toUpdate.invalidate()
+  },
 })
+// port.onMessage.addListener(msg => {
+//   switch (msg.type) {
+//     case 'clear': {
+//       selectedNode.set({})
+//       hoveredNodeId.set(null)
+//       rootNodes.set([])
+
+//       break
+//     }
+
+//     case 'addNode': {
+//       const node = msg.node
+//       node.children = []
+//       node.collapsed = true
+//       node.invalidate = noop
+//       resolveEventBubble(node)
+
+//       const targetNode = nodeMap.get(msg.target)
+//       nodeMap.set(node.id, node)
+
+//       if (targetNode) {
+//         insertNode(node, targetNode, msg.anchor)
+//         return
+//       }
+
+//       if (node._timeout) return
+
+//       node._timeout = setTimeout(() => {
+//         delete node._timeout
+//         const targetNode = nodeMap.get(msg.target)
+//         if (targetNode) insertNode(node, targetNode, msg.anchor)
+//         else rootNodes.update(o => (o.push(node), o))
+//       }, 100)
+
+//       break
+//     }
+
+//     case 'removeNode': {
+//       const node = nodeMap.get(msg.node.id)
+//       const index = node.parent.children.findIndex(o => o.id == node.id)
+//       node.parent.children.splice(index, 1)
+//       nodeMap.delete(node.id)
+
+//       node.parent.invalidate()
+
+//       break
+//     }
+
+//     case 'updateNode': {
+//       const node = nodeMap.get(msg.node.id)
+//       Object.assign(node, msg.node)
+//       resolveEventBubble(node)
+
+//       const selected = get(selectedNode)
+//       if (selected && selected.id == msg.node.id) selectedNode.update(o => o)
+
+//       node.invalidate()
+
+//       break
+//     }
+
+//     case 'inspect': {
+//       let node = nodeMap.get(msg.node.id)
+//       selectedNode.set(node)
+
+//       break
+//     }
+
+//     case 'updateProfile': {
+//       resolveFrame(msg.frame)
+//       profileFrame.set(msg.frame)
+//       break
+//     }
+//   }
+// })

@@ -6,7 +6,7 @@ export default [{
   input: 'src/index.js',
   external: ['chrome'],
   output: {
-    file: 'dest/devtools/bundle.js',
+    file: 'public/build/bundle.js',
     name: 'App',
     format: 'iife',
     globals: {
@@ -15,6 +15,8 @@ export default [{
   },
   plugins: [
     svelte({
+      dev: true,
+      accessors: true,
       preprocess: {
         markup: input => {
           const code = input.content
@@ -23,9 +25,10 @@ export default [{
           return { code }
         }
       },
-      css: css => css.write('dest/devtools/styles.css'),
+      css: css => css.write('public/build/styles.css'),
     }),
-    resolve()
+    resolve(),
+    serve(),
   ]
 }, {
   input: 'src/client/index.js',
@@ -53,7 +56,7 @@ export default [{
 }, {
   input: 'test/src/index.js',
   output: {
-    file: 'test/public/bundle.js',
+    file: 'public/build/test.js',
     name: 'App',
     format: 'iife'
   },
@@ -65,3 +68,20 @@ export default [{
     resolve()
   ]
 }]
+
+function serve() {
+    let started = false;
+
+    return {
+        writeBundle() {
+            if (!started) {
+                started = true;
+
+                require('child_process').spawn('npm', ['run', 'start', '--', '--dev'], {
+                    stdio: ['ignore', 'inherit', 'inherit'],
+                    shell: true
+                });
+            }
+        }
+    };
+}

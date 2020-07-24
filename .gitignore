@@ -1,3 +1,4 @@
+public/
 .cache
 node_modules
 dest/devtools/styles.css

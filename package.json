@@ -9,7 +9,9 @@
     "build:format": "node --experimental-modules ./scripts/format.mjs",
     "build:icon": "for size in 16 24 48 96 128; do if [ ! -e dest/icon-$size.png -o src/svelte-logo.svg -nt dest/icon-$size.png ]; then svgexport src/svelte-logo.svg dest/icon-$size.png $size:; fi; done",
     "dev": "http-serve test/public -p 8940 & web-ext run -s dest -u http://127.0.0.1:8940 -u about:debugging && kill $!",
-    "package": "$npm_execpath run build && web-ext build -s dest"
+    "package": "$npm_execpath run build && web-ext build -s dest",
+    "roll": "rollup -c -w",
+    "start": "sirv public"
   },
   "devDependencies": {
     "http-serve": "^1.0.1",
@@ -26,5 +28,8 @@
   },
   "engines": {
     "node": ">=11.14.0"
+  },
+  "dependencies": {
+    "sirv-cli": "^1.0.3"
   }
 }

@@ -10,6 +10,8 @@
   import Breadcrumbs from './Breadcrumbs.svelte'
   import ConnectMessage from './ConnectMessage.svelte'
   import Node from './nodes/Node.svelte'
+
+$: console.log($rootNodes.map(n => n.id))
 </script>
 
 <style>
