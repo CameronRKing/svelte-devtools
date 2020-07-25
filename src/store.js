@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store'
-import { addNodeListener } from 'svelte-listener'
+import { addNodeListener, getSvelteVersion } from 'svelte-listener'
 
 export const visibility = writable({
   component: true,
@@ -135,34 +135,140 @@ function resolveEventBubble(node) {
   }
 }
 
-function addNode({ target, anchor, node }) {
-  node.children = []
-  node.collapsed = true
-  node.invalidate = noop
-  resolveEventBubble(node)
+// originally, this function existed to pass node data from the content script to the extension
+// but as it did so, it also reshaped the internal data
+// the extension relies on that reshaping, so we must continue to "serialize" the node,
+// even though we could pass the whole object anyway
+function serializeNode(node) {
+  const serialized = {
+    id: node.id,
+    type: node.type,
+    tagName: node.tagName
+  }
+  switch (node.type) {
+    case 'component': {
+      if (!node.detail.$$) {
+        serialized.detail = {}
+        break
+      }
 
-  const targetNode = nodeMap.get(target)
-  nodeMap.set(node.id, node)
+      const internal = node.detail.$$
+      const props = Array.isArray(internal.props)
+        ? internal.props // Svelte < 3.13.0 stored props names as an array
+        : Object.keys(internal.props)
+      let ctx = //clone(
+        shouldUseCapture() ? node.detail.$capture_state() : internal.ctx
+      //)
+      if (ctx === undefined) ctx = {}
 
-  if (targetNode) {
-    insertNode(node, targetNode, anchor)
-    return
+      serialized.detail = {
+        attributes: props.flatMap(key => {
+          const value = ctx[key]
+          delete ctx[key]
+          return value === undefined
+            ? []
+            : { key, value, isBound: key in internal.bound }
+        }),
+        listeners: Object.entries(internal.callbacks).flatMap(
+          ([event, value]) => value.map(o => ({ event, handler: o.toString() }))
+        ),
+        ctx: Object.entries(ctx).map(([key, value]) => ({ key, value }))
+      }
+      break
+    }
+
+    case 'element': {
+      const element = node.detail
+      serialized.detail = {
+        attributes: Array.from(element.attributes).map(attr => ({
+          key: attr.name,
+          value: attr.value
+        })),
+        listeners: element.__listeners
+          ? element.__listeners.map(o => ({
+              ...o,
+              handler: o.handler.toString()
+            }))
+          : []
+      }
+
+      break
+    }
+
+    case 'text': {
+      serialized.detail = {
+        nodeValue: node.detail.nodeValue
+      }
+      break
+    }
+
+    case 'iteration':
+    case 'block': {
+      const { ctx, source } = node.detail
+      serialized.detail = {
+        ctx: Object.entries(/*clone(*/ctx/*)*/).map(([key, value]) => ({
+          key,
+          value
+        })),
+        source: source.substring(source.indexOf('{'), source.indexOf('}') + 1)
+      }
+    }
   }
 
-  if (node._timeout) return
+  return serialized
+}
 
-  node._timeout = setTimeout(() => {
-    delete node._timeout
-    const targetNode = nodeMap.get(target)
-    if (targetNode) insertNode(node, targetNode, anchor)
-    else rootNodes.update(o => (o.push(node), o))
-  }, 100)
+// for some reason, clone() was being called hundreds of thousands of times,
+// it was piling data on the stack, and freezing the application
+// so I just removed calls to it. Didn't seem like they were really doing anything, anyway.
+function clone(value, seen = new Map()) {
+  switch (typeof value) {
+    case 'function':
+      return { __isFunction: true, source: value.toString(), name: value.name }
+    case 'symbol':
+      return { __isSymbol: true, name: value.toString() }
+    case 'object':
+      if (value === window || value === null) return null
+      if (Array.isArray(value)) return value.map(o => clone(o, seen))
+      if (seen.has(value)) return {}
+
+      const o = {}
+      seen.set(value, o)
+
+      for (const [key, v] of Object.entries(value)) {
+        o[key] = clone(v, seen)
+      }
+
+      return o
+    default:
+      return value
+  }
+}
+
+function gte(major, minor, patch) {
+  const version = (getSvelteVersion() || '0.0.0')
+    .split('.')
+    .map(n => parseInt(n))
+  return (
+    version[0] > major ||
+    (version[0] == major &&
+      (version[1] > minor || (version[1] == minor && version[2] >= patch)))
+  )
+}
+
+let _shouldUseCapture = null
+function shouldUseCapture() {
+  return _shouldUseCapture == null
+    ? (_shouldUseCapture = gte(3, 19, 2))
+    : _shouldUseCapture
 }
 
 addNodeListener({
   add(node, anchor) {
+    // console.log('add', node, anchor);
     const target = node.parent ? node.parent.id : null;
     anchor = anchor ? anchor.id : null;
+    node = serializeNode(node);
     node.children = []
     node.collapsed = true
     node.invalidate = noop
@@ -186,8 +292,9 @@ addNodeListener({
     }, 100)
   },
   remove(node) {
-    console.log('remove', node);
+    node = serializeNode(node);
     const toRemove = nodeMap.get(node.id);
+    // console.log('remove', node, node.parent, toRemove, toRemove.parent);
     nodeMap.delete(toRemove.id)
 
     if (toRemove.parent) {
@@ -197,6 +304,8 @@ addNodeListener({
     }
   },
   update(node) {
+    // console.log('update', node);
+    node = serializeNode(node);
     const toUpdate = nodeMap.get(node.id)
     Object.assign(toUpdate, node)
     resolveEventBubble(toUpdate)
